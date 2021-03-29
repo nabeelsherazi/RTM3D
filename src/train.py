@@ -25,11 +25,16 @@ import torch.multiprocessing as mp
 import torch.utils.data.distributed
 from tqdm import tqdm
 
-sys.path.append('./')
+sys.path.append("./")
 
 from data_process.kitti_dataloader import create_train_dataloader, create_val_dataloader
 from models.model_utils import create_model, make_data_parallel, get_num_parameters
-from utils.train_utils import create_optimizer, create_lr_scheduler, get_saved_state, save_checkpoint
+from utils.train_utils import (
+    create_optimizer,
+    create_lr_scheduler,
+    get_saved_state,
+    save_checkpoint,
+)
 from utils.torch_utils import reduce_tensor, to_python_float
 from utils.misc import AverageMeter, ProgressMeter
 from utils.logger import Logger
@@ -49,7 +54,9 @@ def main():
         torch.backends.cudnn.benchmark = False
 
     if configs.gpu_idx is not None:
-        print('You have chosen a specific GPU. This will completely disable data parallelism.')
+        print(
+            "You have chosen a specific GPU. This will completely disable data parallelism."
+        )
 
     if configs.dist_url == "env://" and configs.world_size == -1:
         configs.world_size = int(os.environ["WORLD_SIZE"])
@@ -65,7 +72,9 @@ def main():
 
 def main_worker(gpu_idx, configs):
     configs.gpu_idx = gpu_idx
-    configs.device = torch.device('cpu' if configs.gpu_idx is None else 'cuda:{}'.format(configs.gpu_idx))
+    configs.device = torch.device(
+        "cpu" if configs.gpu_idx is None else "cuda:{}".format(configs.gpu_idx)
+    )
 
     if configs.distributed:
         if configs.dist_url == "env://" and configs.rank == -1:
@@ -75,20 +84,25 @@ def main_worker(gpu_idx, configs):
             # global rank among all the processes
             configs.rank = configs.rank * configs.ngpus_per_node + gpu_idx
 
-        dist.init_process_group(backend=configs.dist_backend, init_method=configs.dist_url,
-                                world_size=configs.world_size, rank=configs.rank)
+        dist.init_process_group(
+            backend=configs.dist_backend,
+            init_method=configs.dist_url,
+            world_size=configs.world_size,
+            rank=configs.rank,
+        )
         configs.subdivisions = int(64 / configs.batch_size / configs.ngpus_per_node)
     else:
         configs.subdivisions = int(64 / configs.batch_size)
 
     configs.is_master_node = (not configs.distributed) or (
-            configs.distributed and (configs.rank % configs.ngpus_per_node == 0))
+        configs.distributed and (configs.rank % configs.ngpus_per_node == 0)
+    )
 
     if configs.is_master_node:
         logger = Logger(configs.logs_dir, configs.saved_fn)
-        logger.info('>>> Created a new logger')
-        logger.info('>>> configs: {}'.format(configs))
-        tb_writer = SummaryWriter(log_dir=os.path.join(configs.logs_dir, 'tensorboard'))
+        logger.info(">>> Created a new logger")
+        logger.info(">>> configs: {}".format(configs))
+        tb_writer = SummaryWriter(log_dir=os.path.join(configs.logs_dir, "tensorboard"))
     else:
         logger = None
         tb_writer = None
@@ -98,17 +112,29 @@ def main_worker(gpu_idx, configs):
 
     # load weight from a checkpoint
     if configs.pretrained_path is not None:
-        assert os.path.isfile(configs.pretrained_path), "=> no checkpoint found at '{}'".format(configs.pretrained_path)
+        assert os.path.isfile(
+            configs.pretrained_path
+        ), "=> no checkpoint found at '{}'".format(configs.pretrained_path)
         model.load_state_dict(torch.load(configs.pretrained_path))
         if logger is not None:
-            logger.info('loaded pretrained model at {}'.format(configs.pretrained_path))
+            logger.info("loaded pretrained model at {}".format(configs.pretrained_path))
 
-    # resume weights of model from a checkpoint
+    # Autoresume weights of model from latest checkpoint
+    # If resume_path is provided, use that instead
+    if configs.resume_path is None and configs.resume is not False:
+        checkpoints = os.listdir(configs.checkpoint_dir)
+        latest = sorted(checkpoints, reversed=True)[0]
+        configs.resume_path = os.path.join(configs.checkpoint_dir, latest)
+
     if configs.resume_path is not None:
-        assert os.path.isfile(configs.resume_path), "=> no checkpoint found at '{}'".format(configs.resume_path)
+        assert os.path.isfile(
+            configs.resume_path
+        ), "=> no checkpoint found at '{}'".format(configs.resume_path)
         model.load_state_dict(torch.load(configs.resume_path))
         if logger is not None:
-            logger.info('resume training model from checkpoint {}'.format(configs.resume_path))
+            logger.info(
+                "resume training model from checkpoint {}".format(configs.resume_path)
+            )
 
     # Data Parallel
     model = make_data_parallel(model, configs)
@@ -116,62 +142,91 @@ def main_worker(gpu_idx, configs):
     # Make sure to create optimizer after moving the model to cuda
     optimizer = create_optimizer(configs, model)
     lr_scheduler = create_lr_scheduler(optimizer, configs)
-    configs.step_lr_in_epoch = False if configs.lr_type in ['multi_step', 'cosin'] else True
+    configs.step_lr_in_epoch = (
+        False if configs.lr_type in ["multi_step", "cosin"] else True
+    )
 
     # resume optimizer, lr_scheduler from a checkpoint
     if configs.resume_path is not None:
-        utils_path = configs.resume_path.replace('Model_', 'Utils_')
-        assert os.path.isfile(utils_path), "=> no checkpoint found at '{}'".format(utils_path)
-        utils_state_dict = torch.load(utils_path, map_location='cuda:{}'.format(configs.gpu_idx))
-        optimizer.load_state_dict(utils_state_dict['optimizer'])
-        lr_scheduler.load_state_dict(utils_state_dict['lr_scheduler'])
-        configs.start_epoch = utils_state_dict['epoch'] + 1
+        utils_path = configs.resume_path.replace("Model_", "Utils_")
+        assert os.path.isfile(utils_path), "=> no checkpoint found at '{}'".format(
+            utils_path
+        )
+        utils_state_dict = torch.load(
+            utils_path, map_location="cuda:{}".format(configs.gpu_idx)
+        )
+        optimizer.load_state_dict(utils_state_dict["optimizer"])
+        lr_scheduler.load_state_dict(utils_state_dict["lr_scheduler"])
+        configs.start_epoch = utils_state_dict["epoch"] + 1
 
     if configs.is_master_node:
         num_parameters = get_num_parameters(model)
-        logger.info('number of trained parameters of the model: {}'.format(num_parameters))
+        logger.info(
+            "number of trained parameters of the model: {}".format(num_parameters)
+        )
 
     if logger is not None:
         logger.info(">>> Loading dataset & getting dataloader...")
     # Create dataloader
     train_dataloader, train_sampler = create_train_dataloader(configs)
     if logger is not None:
-        logger.info('number of batches in training set: {}'.format(len(train_dataloader)))
+        logger.info(
+            "number of batches in training set: {}".format(len(train_dataloader))
+        )
 
     if configs.evaluate:
         val_dataloader = create_val_dataloader(configs)
         val_loss = validate(val_dataloader, model, configs)
-        print('val_loss: {:.4e}'.format(val_loss))
+        print("val_loss: {:.4e}".format(val_loss))
         return
 
     for epoch in range(configs.start_epoch, configs.num_epochs + 1):
         if logger is not None:
-            logger.info('{}'.format('*-' * 40))
-            logger.info('{} {}/{} {}'.format('=' * 35, epoch, configs.num_epochs, '=' * 35))
-            logger.info('{}'.format('*-' * 40))
-            logger.info('>>> Epoch: [{}/{}]'.format(epoch, configs.num_epochs))
+            logger.info("{}".format("*-" * 40))
+            logger.info(
+                "{} {}/{} {}".format("=" * 35, epoch, configs.num_epochs, "=" * 35)
+            )
+            logger.info("{}".format("*-" * 40))
+            logger.info(">>> Epoch: [{}/{}]".format(epoch, configs.num_epochs))
 
         if configs.distributed:
             train_sampler.set_epoch(epoch)
         # train for one epoch
-        train_one_epoch(train_dataloader, model, optimizer, lr_scheduler, epoch, configs, logger, tb_writer)
+        train_one_epoch(
+            train_dataloader,
+            model,
+            optimizer,
+            lr_scheduler,
+            epoch,
+            configs,
+            logger,
+            tb_writer,
+        )
         if (not configs.no_val) and (epoch % configs.checkpoint_freq == 0):
             val_dataloader = create_val_dataloader(configs)
-            print('number of batches in val_dataloader: {}'.format(len(val_dataloader)))
+            print("number of batches in val_dataloader: {}".format(len(val_dataloader)))
             val_loss = validate(val_dataloader, model, configs)
-            print('val_loss: {:.4e}'.format(val_loss))
+            print("val_loss: {:.4e}".format(val_loss))
             if tb_writer is not None:
-                tb_writer.add_scalar('Val_loss', val_loss, epoch)
+                tb_writer.add_scalar("Val_loss", val_loss, epoch)
 
         # Save checkpoint
         if configs.is_master_node and ((epoch % configs.checkpoint_freq) == 0):
-            model_state_dict, utils_state_dict = get_saved_state(model, optimizer, lr_scheduler, epoch, configs)
-            save_checkpoint(configs.checkpoints_dir, configs.saved_fn, model_state_dict, utils_state_dict, epoch)
+            model_state_dict, utils_state_dict = get_saved_state(
+                model, optimizer, lr_scheduler, epoch, configs
+            )
+            save_checkpoint(
+                configs.checkpoints_dir,
+                configs.saved_fn,
+                model_state_dict,
+                utils_state_dict,
+                epoch,
+            )
 
         if not configs.step_lr_in_epoch:
             lr_scheduler.step()
             if tb_writer is not None:
-                tb_writer.add_scalar('LR', lr_scheduler.get_lr()[0], epoch)
+                tb_writer.add_scalar("LR", lr_scheduler.get_lr()[0], epoch)
 
     if tb_writer is not None:
         tb_writer.close()
@@ -183,13 +238,18 @@ def cleanup():
     dist.destroy_process_group()
 
 
-def train_one_epoch(train_dataloader, model, optimizer, lr_scheduler, epoch, configs, logger, tb_writer):
-    batch_time = AverageMeter('Time', ':6.3f')
-    data_time = AverageMeter('Data', ':6.3f')
-    losses = AverageMeter('Loss', ':.4e')
+def train_one_epoch(
+    train_dataloader, model, optimizer, lr_scheduler, epoch, configs, logger, tb_writer
+):
+    batch_time = AverageMeter("Time", ":6.3f")
+    data_time = AverageMeter("Data", ":6.3f")
+    losses = AverageMeter("Loss", ":.4e")
 
-    progress = ProgressMeter(len(train_dataloader), [batch_time, data_time, losses],
-                             prefix="Train - Epoch: [{}/{}]".format(epoch, configs.num_epochs))
+    progress = ProgressMeter(
+        len(train_dataloader),
+        [batch_time, data_time, losses],
+        prefix="Train - Epoch: [{}/{}]".format(epoch, configs.num_epochs),
+    )
 
     criterion = Compute_Loss(device=configs.device)
     num_iters_per_epoch = len(train_dataloader)
@@ -221,7 +281,7 @@ def train_one_epoch(train_dataloader, model, optimizer, lr_scheduler, epoch, con
             if configs.step_lr_in_epoch:
                 lr_scheduler.step()
                 if tb_writer is not None:
-                    tb_writer.add_scalar('LR', lr_scheduler.get_lr()[0], global_step)
+                    tb_writer.add_scalar("LR", lr_scheduler.get_lr()[0], global_step)
 
         if configs.distributed:
             reduced_loss = reduce_tensor(total_loss.data, configs.world_size)
@@ -234,8 +294,8 @@ def train_one_epoch(train_dataloader, model, optimizer, lr_scheduler, epoch, con
 
         if tb_writer is not None:
             if (global_step % configs.tensorboard_freq) == 0:
-                loss_stats['avg_loss'] = losses.avg
-                tb_writer.add_scalars('Train', loss_stats, global_step)
+                loss_stats["avg_loss"] = losses.avg
+                tb_writer.add_scalars("Train", loss_stats, global_step)
         # Log message
         if logger is not None:
             if (global_step % configs.print_freq) == 0:
@@ -245,7 +305,7 @@ def train_one_epoch(train_dataloader, model, optimizer, lr_scheduler, epoch, con
 
 
 def validate(val_dataloader, model, configs):
-    losses = AverageMeter('Loss', ':.4e')
+    losses = AverageMeter("Loss", ":.4e")
     criterion = Compute_Loss(device=configs.device)
     # switch to train mode
     model.eval()
@@ -272,7 +332,7 @@ def validate(val_dataloader, model, configs):
     return losses.avg
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
