@@ -125,7 +125,10 @@ def main_worker(gpu_idx, configs):
         checkpoints = os.listdir(configs.checkpoints_dir)
         logger.info(f"Searching for checkpoints in {configs.checkpoints_dir}")
         for c in checkpoints:
-            logger.info("Found checkpoint: {c}")
+            if c.startswith("Utils"):
+                checkpoints.remove(c)  # Skip util checkpoints
+            else:
+                logger.info(f"Found checkpoint: {c}")
         latest = sorted(checkpoints, reverse=True)[0]
         logger.info(f"Resuming with checkpoint: {latest}")
         configs.resume_path = os.path.join(configs.checkpoints_dir, latest)

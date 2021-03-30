@@ -4,6 +4,7 @@
 
 python train.py \
   --root-dir '../' \
+  --colab \
   --saved_fn 'rtm3d_resnet_18' \
   --arch 'resnet_18' \
   --batch_size 16 \
