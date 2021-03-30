@@ -123,7 +123,11 @@ def main_worker(gpu_idx, configs):
     # If resume_path is provided, use that instead
     if configs.resume_path is None and configs.resume is not False:
         checkpoints = os.listdir(configs.checkpoints_dir)
+        logger.info(f"Searching for checkpoints in {configs.checkpoints_dir}")
+        for c in checkpoints:
+            logger.info("Found checkpoint: {c}")
         latest = sorted(checkpoints, reverse=True)[0]
+        logger.info(f"Resuming with checkpoint: {latest}")
         configs.resume_path = os.path.join(configs.checkpoints_dir, latest)
 
     if configs.resume_path is not None:
