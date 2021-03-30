@@ -122,9 +122,9 @@ def main_worker(gpu_idx, configs):
     # Autoresume weights of model from latest checkpoint
     # If resume_path is provided, use that instead
     if configs.resume_path is None and configs.resume is not False:
-        checkpoints = os.listdir(configs.checkpoint_dir)
+        checkpoints = os.listdir(configs.checkpoints_dir)
         latest = sorted(checkpoints, reversed=True)[0]
-        configs.resume_path = os.path.join(configs.checkpoint_dir, latest)
+        configs.resume_path = os.path.join(configs.checkpoints_dir, latest)
 
     if configs.resume_path is not None:
         assert os.path.isfile(
